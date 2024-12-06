@@ -12,7 +12,6 @@ with open('root.pkl','rb') as f:
 x = DMN2.read_data('Dummy_Data.csv')
 
 
-
 for i in range(10):
     p1 = x[i][0]
     p2 = x[i][1]
