@@ -1,7 +1,7 @@
 import random as rand
 import csv
 import pickle
-import DMN2 as DMN
+import DMN 
 
 # Creates a set of dummy data points into a csv file. 
 # for each row, have 18 values. Each row is one 

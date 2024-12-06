@@ -1,7 +1,7 @@
 import pickle
-from DMN2 import Node,Tree
+from DMN import Node,Tree
 import numpy as np
-import DMN2 
+import DMN 
 
 
 
@@ -9,7 +9,7 @@ import DMN2
 with open('root.pkl','rb') as f:
     output = pickle.load(f)
 
-x = DMN2.read_data('Dummy_Data.csv')
+x = DMN.read_data('Dummy_Data.csv')
 
 
 for i in range(10):
