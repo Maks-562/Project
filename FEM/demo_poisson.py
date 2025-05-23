@@ -82,9 +82,12 @@ from ufl import ds, dx, grad, inner
 # <dolfinx.fem.FunctionSpace>` $V$ on the mesh.
 
 # +
-msh = mesh.create_rectangle(comm=MPI.COMM_WORLD,
-                            points=((0.0, 0.0), (2.0, 1.0)), n=(32, 16),
-                            cell_type=mesh.CellType.triangle)
+msh = mesh.create_rectangle(
+    comm=MPI.COMM_WORLD,
+    points=((0.0, 0.0), (2.0, 1.0)),
+    n=(32, 16),
+    cell_type=mesh.CellType.triangle,
+)
 V = fem.functionspace(msh, ("Lagrange", 1))
 # -
 
@@ -101,9 +104,11 @@ V = fem.functionspace(msh, ("Lagrange", 1))
 # with a 'marker' function that returns `True` for points `x` on the
 # boundary and `False` otherwise.
 
-facets = mesh.locate_entities_boundary(msh, dim=(msh.topology.dim - 1),
-                                       marker=lambda x: np.logical_or(np.isclose(x[0], 0.0),
-                                                                      np.isclose(x[0], 2.0)))
+facets = mesh.locate_entities_boundary(
+    msh,
+    dim=(msh.topology.dim - 1),
+    marker=lambda x: np.logical_or(np.isclose(x[0], 0.0), np.isclose(x[0], 2.0)),
+)
 
 # We now find the degrees-of-freedom that are associated with the
 # boundary facets using {py:func}`locate_dofs_topological
@@ -136,7 +141,9 @@ L = inner(f, v) * dx + inner(g, v) * ds
 # <dolfinx.fem.petsc.LinearProblem.solve>` computes the solution.
 
 # +
-problem = LinearProblem(a, L, bcs=[bc], petsc_options={"ksp_type": "preonly", "pc_type": "lu"})
+problem = LinearProblem(
+    a, L, bcs=[bc], petsc_options={"ksp_type": "preonly", "pc_type": "lu"}
+)
 uh = problem.solve()
 # -
 
@@ -153,11 +160,13 @@ with io.XDMFFile(msh.comm, "out_poisson/poisson.xdmf", "w") as file:
 
 # +
 import os
-os.environ['PYVISTA_USE_OSMESA'] = 'true'
+
+os.environ["PYVISTA_USE_OSMESA"] = "true"
 
 try:
     import pyvista
     from pyvista.utilities.xvfb import start_xvfb
+
     pyvista.OFF_SCREEN = True
     start_xvfb()
     cells, types, x = plot.vtk_mesh(V)
@@ -170,7 +179,7 @@ try:
     plotter.add_mesh(warped)
 
     plotter.screenshot("uh_poisson.png")
-       
+
 except ModuleNotFoundError:
     print("'pyvista' is required to visualise the solution")
     print("Install 'pyvista' with pip: 'python3 -m pip install pyvista'")

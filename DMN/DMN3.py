@@ -27,6 +27,9 @@ class Node:
         self.activation = 0
 
         self.theta = 0
+
+        self.eps = np.zeros(3)
+        self.sigma =np.zeros(3)
 class Tree: 
     def __init__(self,layers):
         self.layers = layers
@@ -919,3 +922,16 @@ def differentiate_D_wrt_D_r(node):
         error[i] = node.error_delta @ row
     
     return error
+
+# calculates the incremental stress of the children ndoes
+# given the pareent node. 
+def update_stress(node):
+    assert type(node) is Node
+
+    children = [node.left, node.right]
+
+    for child in children:
+        print(child)
+        child.sigma[0] = node.sigma[0] * node.rotated_compliance[0]/child.rotated_compliance[0]
+        child.sigma[1] = node.sigma[1]
+        child.sigma[2] = node.sigma[2]
