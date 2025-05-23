@@ -1,0 +1,7 @@
+numpy<=1.26.4
+fenics-dolfinx
+pyvista
+mpi4py
+gmshModel
+ufl
+Ipython
