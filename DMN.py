@@ -5,8 +5,7 @@ import symengine as sym
 from math import ceil
 import time
 from tqdm import tqdm
-
-
+import matplotlib.pyplot as plt
 
 
 class Node:
@@ -239,7 +238,7 @@ class Tree:
         # based on the errors in the system.
 
         nabla_C = self.calc_cost_gradient_alt(D_r)
-   
+        # nabla_C = self.calc_cost_gradient(D_r)
         return nabla_C/(2*M)
 
 
@@ -247,11 +246,45 @@ class Tree:
     
     def SGD(self,epochs,D_r,mini_batch_size,training_data,learning_rate,track_error= False):
         error_array = []
+        colors = []
+        # for x in range(2**self.layers):
+        #     if x%2 == 0:
+        #         colors.append('gray')
+        #     elif x%2 == 1:
+        #         colors.append('white')
+        # g=0
+        # w = 0
+        # for cl in colors:
+        #     if cl   == 'gray':
+        #         g +=1
+        #     elif cl == 'white':
+        #         w +=1
+        #     else:
+        #         print('D')
+
+        # print(g,w)
         
         # makes sure that each node has .weight and .f attributes 
         # at the beginnig of the training.
         
         self.propagate_weights(D_r) 
+        # w_init,f_init,indices = self.get_weights(D_r)
+
+        # plt.rcParams['figure.dpi'] = 300
+        # fig, ax = plt.subplots(figsize=(10,10))
+        # ax.set_axis_off()
+        # squarify.plot(
+        #     sizes=w_init[:8],
+        #     color = colors,
+        #     # pad = 0.0005,
+        #     # label = indices,
+        #     ax=ax,
+        #     ec = 'black'
+        # )
+        # plt.savefig('weights_init.jpg')
+
+
+
 
         for i in range(0,epochs):
             # stochastic part 
@@ -282,15 +315,18 @@ class Tree:
                 # the cost function at all, or should be set to an extremely small value
                 # i.e lam ~ 10^-7 I think gives OK results.
                 
-                self.update_weights(D_r,learning_rate,nabla_C,L,lam =0)    
+                self.update_weights(D_r,learning_rate,nabla_C,L,lam =10**-5)    
                 
                 # since the activations in the bottom layer were updated, the change
                 # needs to be popagated/fedforward through the network.
                 
                 self.propagate_weights(D_r)
-                
+            # self.compression(D_r)    
          
+            a,f,indices = self.get_weights(D_r)
             
+            # print(f'The activations are: {a}')
+            # print(f'The fractions are: {f}')
             # calculates the error of the network after each epoch
             if track_error == True:
                 for example in training_data:
@@ -305,11 +341,24 @@ class Tree:
 
               last15 = error_array[i-15:i]
               std_error = np.std(last15)
-              if std_error < 10**-2:
+              if std_error < 10**-4:
                   print(f' The training process has terminated as the deviation in the last 15 error values is: {std_error:.3f}')
                   return error_array
-            
-            
+        # w_last,f_last = self.get_weights(D_r)     
+        
+        
+        
+        # plt.rcParams['figure.dpi'] = 300
+        # fig, ax = plt.subplots(figsize=(10,10))
+        # ax.set_axis_off()
+        # squarify.plot(
+        #     sizes=w_last,
+        #     color = colors,
+        #     pad = 0.1,
+        #     ax=ax
+        # )
+        # plt.savefig('weights.jpg')
+
         return error_array
 
     
@@ -471,8 +520,53 @@ class Tree:
             if (node.layer ==layer_num) and (node.index == index) :
                 return node
             
-   
+    def get_weights(self,rootnode):
+        weights = []
+        fractions = []
+        indices = []
+        if rootnode is None:
+            return
+        queue = [rootnode]
+        while queue:
+            node = queue.pop(0)
+        
+            if node.left:
+                queue.append(node.left)
+            if node.right:
+                queue.append(node.right)
 
+            if (node.layer ==self.layers) and (node.layer == self.layers):
+                weights.append(node.activation) 
+                fractions.append(node.f) 
+                indices.append(node.index)
+        return np.array(weights),np.array(fractions),np.array(indices)
+
+    
+  
+
+    
+    def compression(self,rootnode):    
+        if rootnode is None:
+            return
+        queue = [rootnode]
+        while queue:
+            node = queue.pop(0)
+        
+            if node.left:
+                queue.append(node.left)
+            if node.right:
+                queue.append(node.right)
+        
+            if node.layer !=0  and node.left is not None:
+                if node.left.f == 1.0:
+                    node.left.left = node
+                    node.left.right = node
+            elif node.layer !=0  and node.right is not None:
+                if node.right.f == 1.0:
+                    node.right.left = node
+                    node.right.right = node
+ 
+ 
 # phase1 and phase2 are node classes
 # node.compliance is the compliance matrix of vectorised form:
 # [D_11, D_12, D_13, D_22, D_23, D_33]
@@ -485,8 +579,8 @@ def homogenise(phase1,phase2):
     D_r = np.zeros(6)
     
     gamma = phase1.f * phase2.compliance[0] + phase2.f * phase1.compliance[0]
-
-    D_r[0] = (phase1.compliance[0] * phase1.compliance[0])/gamma
+    # HUGE ERROR
+    D_r[0] = (phase1.compliance[0] * phase2.compliance[0])/gamma
     D_r[1] = (phase1.f * phase1.compliance[1] * phase2.compliance[0] + phase2.f * phase2.compliance[1] * phase1.compliance[0])/gamma
     D_r[2] = (phase1.f * phase1.compliance[2] * phase2.compliance[0] + phase2.f * phase2.compliance[2] * phase1.compliance[0])/gamma
     D_r[3] = phase1.f * phase1.compliance[3] + phase2.f * phase2.compliance[3] - (1/gamma) * (phase1.f * phase2.f) * (phase1.compliance[1] - phase2.compliance[1])**2
@@ -632,7 +726,7 @@ def differentiate_parent(parent,element):
     
     # forms the actual structure of the parent compliance matrix, based on the children's compliance matrices.
     
-    D_r_11 = (D_1_11 * D_1_11)/gamma
+    D_r_11 = (D_1_11 * D_2_11)/gamma
     D_r_12 = (f1 * D_1_12 * D_2_11 + f2 * D_2_12 * D_1_11)/gamma
     D_r_13 = (f1 * D_1_13 * D_2_11 +f2 * D_2_13 * D_1_11)/gamma
     D_r_22 = f1 * D_1_22 + f2 * D_2_22- (1/gamma) * (f1 *f2) * (D_1_12 - D_2_12)**2
@@ -692,6 +786,7 @@ def differentiate_fraction(parent,bottom_layer_array):
    
     return df_dw
      
+     
         
 # differentiates a weight in the network wrt 
 # a bottom layer weight. node_k is in the network and
@@ -706,3 +801,24 @@ def differentiate_weight(node_k,node_j):
         return 1.0
     else:
         return 0.0
+
+
+# compares the subtree of one parent. I.e given a parent node,
+# compares the subtrees of its children together.
+
+def subtree_merge(parent):
+    differences = []
+    
+    
+    if parent is None:
+        return
+    queue = [parent]
+    while queue:
+        node = queue.pop(0)
+    
+        if node.left:
+            queue.append(node.left)
+        if node.right:
+            queue.append(node.right)
+    if node.left is not None and node.right is not None:
+       node.left.f
