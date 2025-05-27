@@ -54,11 +54,10 @@ def homogenise_res(phase1,phase2,f1,f2,res1,res2):
     
     res_r[0] = (f1* res1[0]* phase2[0] + f2 * res2[0]*phase1[0])/gamma
     res_r[1] = (f1* res1[1] + f2* res2[1]) - (1/gamma) *(f1*f2) *(res1[0] - res2[0]) * (phase1[1] - phase2[1])
-    res_r[1] = (f1* res1[1] + f2* res2[1]) - (1/gamma) *(f1*f2) *(res1[0] - res2[0]) * (phase1[1] - phase2[1])
+    res_r[2] = (f1* res1[2] + f2* res2[2]) - (1/gamma) *(f1*f2) *(res1[0] - res2[0]) * (phase1[2] - phase2[2])
    
 
-
-    return 
+    return res_r
 
 @njit
 def convert_vectorised(vectorised_compliance_matrix):
@@ -232,3 +231,9 @@ def load_model(filename):
         rootnode = pickle.load(f)
 
     return metadata, training_error, validation_error, rootnode
+
+# projection matrix
+P = 1/3* np.array([[2,-1,0],
+            [-1,2,0],
+            [0,0,6]])
+

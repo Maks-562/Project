@@ -3,8 +3,8 @@ import random
 import sympy as sym
 import pickle
 from math import ceil
-from DMN_funcs import convert_matrix,convert_vectorised,calc_error_0,R,homogenise,error_relative,cost,relu, relu_prime,differentiate_D_wrt_theta
-
+# from DMN_funcs import convert_matrix,convert_vectorised,calc_error_0,R,homogenise,error_relative,cost,relu, relu_prime,differentiate_D_wrt_theta
+from helperfuncs import *
 
 class Node:
     def __init__(self,compliance):
@@ -935,3 +935,27 @@ def update_stress(node):
         child.sigma[0] = node.sigma[0] * node.rotated_compliance[0]/child.rotated_compliance[0]
         child.sigma[1] = node.sigma[1]
         child.sigma[2] = node.sigma[2]
+
+# computes the elasto-plastic operator of the node
+# method is in Box 9.6 in the book "Computational Plasticity"
+def calc_elasto_plastic_operator(node,H=0,dgamma=0):
+    assert type(node) is Node
+    assert dgamma >= 0 
+    
+    
+    if dgamma == 0:
+        return convert_vectorised(node.rotated_compliance)
+    elif dgamma>0:
+        xi  = node.sigma.T @ P @ node.sigma
+        D_mat = convert_vectorised(node.rotated_compliance)
+
+        E = np.linalg.inv(D_mat + dgamma*P)
+
+        n = E @ P @ node.sigma
+    
+        alpha = 1/(node.sigma.T @P@n + 2*xi * H/(3-2*H*dgamma))
+
+        
+        print(alpha ,np.outer(n,n),n,E)
+        return np.linalg.inv(E-alpha* np.outer(n,n))
+   
