@@ -28,10 +28,15 @@ class Node:
 
         self.theta = 0
 
-        self.eps = np.zeros(3)
-        self.sigma =np.zeros(3)
+        self.delta_eps = np.zeros(3)
+        self.delta_sigma =np.zeros(3)
         self.eff_plas_strain = 0
         self.res_strain = np.zeros(3)
+
+        self.eps = np.zeros(3)
+        self.sigma =np.zeros(3)
+
+
 class Tree: 
     def __init__(self,layers):
         self.layers = layers
@@ -894,7 +899,7 @@ class Tree:
             if node.left is not None and node.right is not None:
                 update_stress(node)
                 # print("Updating stress of nodes: ", (node.left.layer,node.left.index),(node.right.layer,node.right.index))
-            node.eps = convert_vectorised(node.rotated_compliance) @ node.sigma + node.res_strain
+            node.delta_eps = convert_vectorised(node.rotated_compliance) @ node.delta_sigma + node.res_strain
             # print("Updating the strain of node: ", node.layer,node.index)
 # differentiates the volume fraction of the children
 #  node with respect to a series of weights in the bottom layer, with 
@@ -981,9 +986,9 @@ def update_stress(node):
     children = [node.left, node.right]
 
     for child in children:
-        child.sigma[0] = node.sigma[0] * node.rotated_compliance[0]/child.rotated_compliance[0]
-        child.sigma[1] = node.sigma[1]
-        child.sigma[2] = node.sigma[2]
+        child.delta_sigma[0] = node.delta_sigma[0] * node.rotated_compliance[0]/child.rotated_compliance[0]
+        child.delta_sigma[1] = node.delta_sigma[1]
+        child.delta_sigma[2] = node.delta_sigma[2]
 
 # computes the elasto-plastic operator of the node
 # method is in Box 9.6 in the book "Computational Plasticity".
@@ -1008,3 +1013,99 @@ def calc_elasto_plastic_operator(node,H=0,dgamma=0):
         
         print(alpha ,np.outer(n,n),n,E)
         return np.linalg.inv(E-alpha* np.outer(n,n))
+
+# evaluates the trial elastic state. Checks for plastic adimssability.
+# only for bottom layer
+def return_mapping(node):
+    assert type(node) is Node
+
+    eps_trial = node.eps + node.delta_eps
+    effective_plastic_strain_trial = node.eff_plas_strain
+    sigma_trial = convert_vectorised(node.rotated_compliance) @ eps_trial
+
+    # a1 = (sigma_trial[0] + sigma_trial[1]) **2
+    # a2 = (sigma_trial[1] - sigma_trial[0]) **2
+    # a3 = (sigma_trial[2])**2
+    # xi_trial = (1/6 * a1 + 1/2*a2 +2*a3)
+    xi_trial = xi(node,0,sigma_trial)
+
+    phi_trial = 1/2 * xi_trial - 1/3 * hardening_law(effective_plastic_strain_trial)**2
+
+    
+    # plastic condition
+    if phi_trial <=0:
+        # elastic state
+        node.eps = eps_trial
+        node.eff_plas_strain = effective_plastic_strain_trial
+        node.sigma = sigma_trial
+
+    else:
+        delta_gamma = evaluate_plastic_state(node,sigma_trial)
+        D = convert_vectorised(node.rotated_compliance)
+        A = np.linalg.inv(D + delta_gamma *P)@ D
+        node.sigma = A@sigma_trial
+        node.eps = np.linalg.inv(D) @ node.sigma
+        xi_temp = xi(node,delta_gamma,node.sigma)
+        node.eff_plas_strain += delta_gamma * np.sqrt(2*xi_temp/3)
+
+# Evaluates at the CURRENT effective plastiv strain.
+# But uses the TRIAL stress
+def evaluate_plastic_state(node,sigma_trial):
+    assert type(node) is Node
+    N_max_iters = 100
+    delta_gamma = 0
+    
+    xi_temp = xi(node,delta_gamma,sigma_trial)
+    phi = 1/2 * xi_temp - 1/3 * hardening_law(node.eff_plas_strain)**2
+    
+    for i in range(N_max_iters):
+        H_temp = H(node.eff_plas_strain +delta_gamma * np.sqrt(2*xi_temp/3) )
+        xi_prime_temp = xi_prime(node,delta_gamma,sigma_trial)
+        
+        H_prime = 2 * hardening_law(node.eff_plas_strain +delta_gamma * np.sqrt(2*xi_temp/3) ) * H_temp *np.sqrt(2/3) *(np.sqrt(xi_temp) + delta_gamma*xi_prime_temp/(2*np.sqrt(xi_temp)))
+        
+        phi_prime  = 1/2 * xi_prime_temp - 1/3 * H_prime
+
+        delta_gamma+= -phi/phi_prime
+
+        xi_temp = xi(node,delta_gamma,sigma_trial)
+        phi = 1/2 * xi_temp - 1/3 * hardening_law(node.eff_plas_strain + delta_gamma * np.sqrt(2*xi_temp/3))**2
+        
+        if abs(phi) <10**-5:
+            return delta_gamma
+    raise ValueError(f'Plastic state not converged after {N_max_iters} iterations')
+
+
+
+# returns sigma_Y as a function of effective plastic strain.
+def hardening_law(eff_plas_strain):
+    if eff_plas_strain < 0.008:
+        return 0.1 + 5*eff_plas_strain
+    elif eff_plas_strain > 0.008:
+        return 0.14 + 2*eff_plas_strain
+
+
+def H(eff_plas_strain):
+    if eff_plas_strain < 0.008:
+        return 5
+    elif eff_plas_strain>0.008:
+        return 2
+
+
+
+def xi(node,delta_gamma,sigma_trial=np.zeros((3,))):
+    D = convert_vectorised(node.rotated_compliance)
+    A = np.linalg.inv(D + delta_gamma *P)@ D
+    
+    
+    return sigma_trial.T @A.T@P@A@sigma_trial
+
+def xi_prime(node,delta_gamma,sigma_trial=np.zeros((3,))):
+    D = convert_vectorised(node.rotated_compliance)
+    C = np.linalg.inv(D)
+    A = np.linalg.inv(D + delta_gamma *P)@ D
+    
+    middle_mat = P.T @C.T@ A.T + P@A@C
+
+
+    return -sigma_trial.T@A.T@middle_mat@P@A@sigma_trial
