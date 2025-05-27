@@ -30,6 +30,8 @@ class Node:
 
         self.eps = np.zeros(3)
         self.sigma =np.zeros(3)
+        self.eff_plas_strain = 0
+        self.res_strain = np.zeros(3)
 class Tree: 
     def __init__(self,layers):
         self.layers = layers
@@ -121,6 +123,7 @@ class Tree:
                     # node.compliance = convert_matrix(R(-node.theta) @ convert_vectorised(phase1) @ R(node.theta))
                     node.compliance = phase1
                     node.rotated_compliance = convert_matrix(R(-node.theta) @ convert_vectorised(phase1) @ R(node.theta))
+                    node.res_strain = np.random.uniform(-1,1,(3,))
                     # node.compliance = np.zeros(6)
                     # node.rotated_compliance = phase1
                 else:
@@ -128,6 +131,8 @@ class Tree:
                     
                     node.compliance = phase2
                     node.rotated_compliance = convert_matrix(R(-node.theta) @ convert_vectorised(phase2) @ R(node.theta))
+                    node.res_strain = np.random.uniform(-1,1,(3,))
+                    
                     # node.compliance =np.zeros(6)
                     # node.rotated_compliance = phase2
     # A Breadth First Search to search all the elements in the tree,
@@ -198,7 +203,7 @@ class Tree:
             f2 = rootnode.right.f
 
             rootnode.compliance = homogenise(p1,p2,f1,f2)
-            # print(rootnode.compliance,rootnode.f,rootnode.weight)
+            
             # rotation line equation (11) 
             rootnode.rotated_compliance = convert_matrix(R(-rootnode.theta) @ convert_vectorised(rootnode.compliance) @ R(rootnode.theta))
           
@@ -845,7 +850,52 @@ class Tree:
 
         parent.error_alpha = differentiate_D_wrt_D_r(parent)
 
+    def homogenise_system_res(self,rootnode,phase1,phase2):
+        if rootnode is None:
+            return
+        
+        # recursive part of the function
+        self.homogenise_system_res(rootnode.left,phase1,phase2)
+        self.homogenise_system_res(rootnode.right,phase1,phase2)
+
+
+      
+
+        # makes sure that the current node is not in the bottom layer.
+        # Doesn't make sense to homogenise the bottom layer, since there
+        # are no elements below it  
+        
+        if rootnode.left is not None and rootnode.right is not None:
+            p1 = rootnode.left.rotated_compliance
+            p2 = rootnode.right.rotated_compliance
+            f1 = rootnode.left.f
+            f2 = rootnode.right.f
+            res1 = rootnode.left.res_strain
+            res2 = rootnode.right.res_strain
+            theta = rootnode.theta
+            
+            rootnode.compliance = homogenise(p1,p2,f1,f2)
+            rootnode.res_strain = homogenise_res(p1,p2,f1,f2,res1,res2)
+            # rotation line equation (11) 
+            rootnode.rotated_compliance = convert_matrix(R(-theta) @ convert_vectorised(rootnode.compliance) @ R(theta))
+            rootnode.res_strain = R(-theta) @ rootnode.res_strain
     
+    def backwards_pass(self,rootnode):
+        if rootnode is None:
+            return
+        queue = [rootnode]
+        while queue:
+            node = queue.pop(0)
+        
+            if node.left:
+                queue.append(node.left)
+            if node.right:
+                queue.append(node.right)
+            if node.left is not None and node.right is not None:
+                update_stress(node)
+                # print("Updating stress of nodes: ", (node.left.layer,node.left.index),(node.right.layer,node.right.index))
+            node.eps = convert_vectorised(node.rotated_compliance) @ node.sigma + node.res_strain
+            # print("Updating the strain of node: ", node.layer,node.index)
 # differentiates the volume fraction of the children
 #  node with respect to a series of weights in the bottom layer, with 
 # input of a parent node. Returns an array of the two derivatives 
@@ -931,13 +981,13 @@ def update_stress(node):
     children = [node.left, node.right]
 
     for child in children:
-        print(child)
         child.sigma[0] = node.sigma[0] * node.rotated_compliance[0]/child.rotated_compliance[0]
         child.sigma[1] = node.sigma[1]
         child.sigma[2] = node.sigma[2]
 
 # computes the elasto-plastic operator of the node
-# method is in Box 9.6 in the book "Computational Plasticity"
+# method is in Box 9.6 in the book "Computational Plasticity".
+# Only valid for dgamma>0
 def calc_elasto_plastic_operator(node,H=0,dgamma=0):
     assert type(node) is Node
     assert dgamma >= 0 
@@ -958,4 +1008,3 @@ def calc_elasto_plastic_operator(node,H=0,dgamma=0):
         
         print(alpha ,np.outer(n,n),n,E)
         return np.linalg.inv(E-alpha* np.outer(n,n))
-   
