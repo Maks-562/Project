@@ -7,7 +7,7 @@ from math import ceil
 from helperfuncs import *
 
 class Node:
-    def __init__(self,compliance):
+    def __init__(self,compliance,num_loading_steps = 10):
         self.left = None
         self.right = None
         
@@ -33,17 +33,17 @@ class Node:
         self.eff_plas_strain = 0
         self.res_strain = np.zeros(3)
 
-        self.eps = np.zeros(3)
-        self.sigma =np.zeros(3)
+        self.epss = np.zeros((num_loading_steps,3))
+        self.sigmas =np.zeros((num_loading_steps,3))
 
 
 class Tree: 
     def __init__(self,layers):
         self.layers = layers
         self.derivatives_cache = []
-    def initialise(self):
+    def initialise(self,num_loading_steps = 10):
         queue = []
-        rootNode = Node([0]*6)
+        rootNode = Node([0]*6,num_loading_steps)
         
         # rootnode is the first node in the tree, i.e the output
 
@@ -63,8 +63,8 @@ class Tree:
                 node = queue.pop(0)
 
                 # links parent nodes to child nodes
-                node.left = Node(np.array([i]*6))
-                node.right = Node(np.array([i]*6))
+                node.left = Node(np.array([i]*6),num_loading_steps)
+                node.right = Node(np.array([i]*6),num_loading_steps)
                 
                 # sets the layer number of the child nodes
                 node.left.layer = i
@@ -855,13 +855,13 @@ class Tree:
 
         parent.error_alpha = differentiate_D_wrt_D_r(parent)
 
-    def homogenise_system_res(self,rootnode,phase1,phase2):
+    def homogenise_system_res(self,rootnode):
         if rootnode is None:
             return
         
         # recursive part of the function
-        self.homogenise_system_res(rootnode.left,phase1,phase2)
-        self.homogenise_system_res(rootnode.right,phase1,phase2)
+        self.homogenise_system_res(rootnode.left)
+        self.homogenise_system_res(rootnode.right)
 
 
       
@@ -885,7 +885,9 @@ class Tree:
             rootnode.rotated_compliance = convert_matrix(R(-theta) @ convert_vectorised(rootnode.compliance) @ R(theta))
             rootnode.res_strain = R(-theta) @ rootnode.res_strain
     
+    # passing stresses and strains backwards and checks for convergence. Returns status of convergence.
     def backwards_pass(self,rootnode):
+        max_error = -10**29
         if rootnode is None:
             return
         queue = [rootnode]
@@ -898,9 +900,65 @@ class Tree:
                 queue.append(node.right)
             if node.left is not None and node.right is not None:
                 update_stress(node)
-                # print("Updating stress of nodes: ", (node.left.layer,node.left.index),(node.right.layer,node.right.index))
-            node.delta_eps = convert_vectorised(node.rotated_compliance) @ node.delta_sigma + node.res_strain
-            # print("Updating the strain of node: ", node.layer,node.index)
+            if node.left is None and node.right is None:   
+                # might possibly be 0. Will need to check
+                delta_eps_new =  convert_vectorised(node.rotated_compliance) @ node.delta_sigma + node.res_strain
+                
+                max_error =  max(np.linalg.norm(node.delta_eps -delta_eps_new),max_error)
+                
+                node.delta_eps =  convert_vectorised(node.rotated_compliance) @ node.delta_sigma + node.res_strain
+        print('Max error in backwards pass is: ',max_error)
+        if max_error <10**-2:
+            return True
+        else:
+            return False
+
+           
+
+    def return_mapping_bottom_layer(self,rootnode,loading_index=1):
+        if rootnode is None:
+            return
+        queue = [rootnode]
+        while queue:
+            node = queue.pop(0)
+        
+            if node.left:
+                queue.append(node.left)
+            if node.right:
+                queue.append(node.right)
+            if node.left is None and node.right is None:
+                return_mapping(node,loading_index=loading_index)
+
+
+    def plasticity_loader(self,rootnode,loading_path):
+       
+        # rootnode.epss = np.zeros((len(loading_path),3))
+       
+        rootnode.epss[:,0] = loading_path
+        
+        loading_indices = np.arange(1,len(loading_path),1)
+      
+        
+
+        for loading_index in loading_indices:
+            
+            convergence_bool = False
+       
+            while not convergence_bool:
+                self.return_mapping_bottom_layer(rootnode,loading_index=loading_index)
+              
+
+                self.homogenise_system_res(rootnode)
+            
+                update_output_stress(rootnode,loading_path,loading_index)
+
+
+                convergence_bool = self.backwards_pass(rootnode)
+           
+            rootnode.sigmas[loading_index] = rootnode.sigmas[loading_index-1]  + rootnode.delta_sigma
+
+            
+
 # differentiates the volume fraction of the children
 #  node with respect to a series of weights in the bottom layer, with 
 # input of a parent node. Returns an array of the two derivatives 
@@ -993,40 +1051,39 @@ def update_stress(node):
 # computes the elasto-plastic operator of the node
 # method is in Box 9.6 in the book "Computational Plasticity".
 # Only valid for dgamma>0
-def calc_elasto_plastic_operator(node,H=0,dgamma=0):
+def calc_elasto_plastic_operator(node,H=0,dgamma=0,loading_index=1):
     assert type(node) is Node
     assert dgamma >= 0 
     
+    sigma = node.sigmas[loading_index]
     
     if dgamma == 0:
         return convert_vectorised(node.rotated_compliance)
     elif dgamma>0:
-        xi  = node.sigma.T @ P @ node.sigma
+        xi  = sigma.T @ P @ sigma
         D_mat = convert_vectorised(node.rotated_compliance)
 
         E = np.linalg.inv(D_mat + dgamma*P)
 
-        n = E @ P @ node.sigma
+        n = E @ P @ sigma
     
-        alpha = 1/(node.sigma.T @P@n + 2*xi * H/(3-2*H*dgamma))
+        alpha = 1/(sigma.T @P@n + 2*xi * H/(3-2*H*dgamma))
 
         
-        print(alpha ,np.outer(n,n),n,E)
+        # print(alpha ,np.outer(n,n),n,E)
         return np.linalg.inv(E-alpha* np.outer(n,n))
 
 # evaluates the trial elastic state. Checks for plastic adimssability.
-# only for bottom layer
-def return_mapping(node):
+# only for bottom layer.loading_index should start at 1 I'm pretty sure.
+def return_mapping(node,loading_index=1):
     assert type(node) is Node
-
-    eps_trial = node.eps + node.delta_eps
+    assert loading_index >= 1
+    
+    eps_trial = node.epss[loading_index] + node.delta_eps
+    
     effective_plastic_strain_trial = node.eff_plas_strain
     sigma_trial = convert_vectorised(node.rotated_compliance) @ eps_trial
 
-    # a1 = (sigma_trial[0] + sigma_trial[1]) **2
-    # a2 = (sigma_trial[1] - sigma_trial[0]) **2
-    # a3 = (sigma_trial[2])**2
-    # xi_trial = (1/6 * a1 + 1/2*a2 +2*a3)
     xi_trial = xi(node,0,sigma_trial)
 
     phi_trial = 1/2 * xi_trial - 1/3 * hardening_law(effective_plastic_strain_trial)**2
@@ -1035,29 +1092,46 @@ def return_mapping(node):
     # plastic condition
     if phi_trial <=0:
         # elastic state
-        node.eps = eps_trial
+        
         node.eff_plas_strain = effective_plastic_strain_trial
-        node.sigma = sigma_trial
-
+        sigma_trial = sigma_trial
+        eps_trial = eps_trial
+        delta_gamma=0
     else:
         delta_gamma = evaluate_plastic_state(node,sigma_trial)
         D = convert_vectorised(node.rotated_compliance)
         A = np.linalg.inv(D + delta_gamma *P)@ D
-        node.sigma = A@sigma_trial
-        node.eps = np.linalg.inv(D) @ node.sigma
-        xi_temp = xi(node,delta_gamma,node.sigma)
+        
+        sigma_trial = A@sigma_trial
+        
+        eps_trial = np.linalg.inv(D) @ sigma_trial
+        xi_temp = xi(node,delta_gamma,sigma_trial)
+        
         node.eff_plas_strain += delta_gamma * np.sqrt(2*xi_temp/3)
+
+    # updating only for placeholder purposes.
+    node.epss[loading_index] = eps_trial
+    node.sigmas[loading_index] = sigma_trial
+    
+    node.delta_sigma = node.sigmas[loading_index] - node.sigmas[loading_index-1]
+    node.delta_eps = node.epss[loading_index] - node.epss[loading_index-1]
+
+    node.res_strain = node.delta_eps - convert_vectorised(node.rotated_compliance) @ node.delta_sigma
+
+    node.rotated_compliance = convert_matrix(calc_elasto_plastic_operator(node,H(node.eff_plas_strain),delta_gamma,loading_index=loading_index))
 
 # Evaluates at the CURRENT effective plastiv strain.
 # But uses the TRIAL stress
 def evaluate_plastic_state(node,sigma_trial):
     assert type(node) is Node
-    N_max_iters = 100
+    
+    N_max_iters = 5000
     delta_gamma = 0
     
     xi_temp = xi(node,delta_gamma,sigma_trial)
     phi = 1/2 * xi_temp - 1/3 * hardening_law(node.eff_plas_strain)**2
-    
+    # print('phi=',phi)
+    print('xi and sigma_y',xi_temp,hardening_law(node.eff_plas_strain)**2)
     for i in range(N_max_iters):
         H_temp = H(node.eff_plas_strain +delta_gamma * np.sqrt(2*xi_temp/3) )
         xi_prime_temp = xi_prime(node,delta_gamma,sigma_trial)
@@ -1069,12 +1143,28 @@ def evaluate_plastic_state(node,sigma_trial):
         delta_gamma+= -phi/phi_prime
 
         xi_temp = xi(node,delta_gamma,sigma_trial)
-        phi = 1/2 * xi_temp - 1/3 * hardening_law(node.eff_plas_strain + delta_gamma * np.sqrt(2*xi_temp/3))**2
         
-        if abs(phi) <10**-5:
+        phi = 1/2 * xi_temp - 1/3 * hardening_law(node.eff_plas_strain + delta_gamma * np.sqrt(2*xi_temp/3))**2
+      
+        if abs(phi) <10**-2:
             return delta_gamma
     raise ValueError(f'Plastic state not converged after {N_max_iters} iterations')
 
+# only for the output node. enforces the global strain
+def update_output_stress(node,loading_path,loading_index):
+    assert type(node) is Node
+    assert node.layer == 0
+    assert loading_index>=1
+
+    D = convert_vectorised(node.rotated_compliance)
+    C = np.linalg.inv(D)
+    
+    delta_eps = loading_path[loading_index] - loading_path[loading_index-1]
+
+
+    node.delta_sigma = C@(delta_eps - node.res_strain)
+    print('Delta sigma:',node.delta_sigma)
+   
 
 
 # returns sigma_Y as a function of effective plastic strain.
@@ -1083,14 +1173,16 @@ def hardening_law(eff_plas_strain):
         return 0.1 + 5*eff_plas_strain
     elif eff_plas_strain > 0.008:
         return 0.14 + 2*eff_plas_strain
-
+    else:
+        raise ValueError('Effective plastic strain must be positive')
 
 def H(eff_plas_strain):
     if eff_plas_strain < 0.008:
         return 5
     elif eff_plas_strain>0.008:
         return 2
-
+    else:
+        raise ValueError('Effective plastic strain must be positive')
 
 
 def xi(node,delta_gamma,sigma_trial=np.zeros((3,))):
