@@ -222,33 +222,47 @@ num_samples = phase1.shape[0]
 # ---------- Training Loop ----------
 key = jax.random.PRNGKey(0)
 
-dmn = DMN(N=6, key=key)
+dmn = DMN(N=5, key=key)
 
 batch_size = 20
-
-opt = optax.adam(learning_rate=0.0005)
+epoch_num = 5000
+opt = optax.sgd(learning_rate=0.05)
 opt_state = opt.init(dmn)
 
-
-for epoch in range(1000):
+loss_ = []
+for epoch in range(epoch_num):
     key,subkey = jax.random.split(key)
-    indxs = jax.random.permutation(key,num_samples)
+    # indxs = jax.random.permutation(key,num_samples)
    
-    phase1 = phase1[indxs]
-    phase2 = phase2[indxs]
-    D_dns = D_dns[indxs]
+    # phase1 = phase1[indxs]
+    # phase2 = phase2[indxs]
+    # D_dns = D_dns[indxs]
 
     for batch_index in range(0,num_samples, batch_size):
         phase_1_batch = phase1[batch_index:batch_index + batch_size]
         phase2_batch = phase2[batch_index:batch_index + batch_size]
         D_dns_batch = D_dns[batch_index:batch_index + batch_size]
         dmn, opt_state, loss = make_training_step(opt, opt_state, dmn, phase_1_batch, phase2_batch, D_dns_batch)
+    loss_.append(loss)
     
     if epoch % 10 == 0:
         example_out = dmn(phase1[0], phase2[0])
         rel_err = error_relative(D_dns[0], example_out)
         print(f"Epoch {epoch}, Loss: {loss:.6f}, Rel Error: {rel_err*100:.4f} %")
-    
 for i in range(5):
     print(D_dns[i])
     print(dmn(phase1[i], phase2[i]))
+
+epochs = jnp.arange(0,epoch_num)
+
+# plt.plot(epochs,loss_)
+# plt.savefig("DMN_loss.png")
+plt.figure(figsize=(8, 5))
+plt.loglog(epochs, loss_, marker='o', linestyle='-', color='tab:blue', label='Training Loss')
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+plt.title("DMN Training Loss Curve")
+plt.grid(True, linestyle='--', alpha=0.6)
+plt.legend()
+plt.tight_layout()
+plt.savefig("DMN_loss.png", dpi=150)
