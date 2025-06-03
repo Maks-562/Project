@@ -4,28 +4,52 @@ from jax import grad, jit, vmap, lax
 import equinox as eqx
 import optax
 import pandas as pd
-import numpy as np
+from matplotlib import pyplot as plt
+import math
 
 # ---------- DMN model as an Equinox Module ----------
 class DMN(eqx.Module):
     theta: jax.Array
     activation: jax.Array
-    weight: jax.Array
-    fractions: jax.Array 
     left: jax.Array = eqx.field(static=True)
     right: jax.Array = eqx.field(static=True)
-    layer: jax.Array = eqx.field(static=True)
+
+    def __init__(self,N,key=None):
+        num_nodes = 2**(N+1) - 1
+        
+        if key is None:
+            key = jax.random.PRNGKey(0)  
+       
+        self.theta = jax.random.uniform(key, (num_nodes,), float, -jnp.pi, jnp.pi)
+        self.activation = jnp.zeros((num_nodes,)).at[2**N-1:].set(jax.random.uniform(key, (2**N,), float, 0.2, 0.8))
+        left = -jnp.ones((num_nodes,), dtype=jnp.int32)
+        right = -jnp.ones((num_nodes,), dtype=jnp.int32)
+
+        for i in range(num_nodes - 2**N):
+            l = 2 * i + 1
+            r = 2 * i + 2
+            left = left.at[i].set(l)
+            right = right.at[i].set(r)
+        self.left = left
+        self.right = right
+        
+
 
     def __call__(self, phase1, phase2):
         num_nodes = self.theta.shape[0]
-        compliance = jnp.zeros((num_nodes, 6))
         
-        ws = self.weight
-        fs = self.fractions
+        N = int(math.log2(num_nodes + 1)) - 1
+        start = 2 ** N
+    
+        compliance = jnp.zeros((num_nodes, 6))
+        ws = jnp.zeros((num_nodes,))
+        fs = jnp.zeros((num_nodes,))
+       
+
         
         def propagate_weights(i,ws):
             
-            j = num_nodes-i
+            j = num_nodes - i - 1
             
             l = self.left[j]
             r = self.right[j]
@@ -42,12 +66,12 @@ class DMN(eqx.Module):
                 return ws[l] + ws[r]  
             
             updated = lax.cond(is_leaf, handle_leaf, handle_inner, operand=None)
-           
+    
             return ws.at[j].set(updated)
         
         # propagete the volume fractions f
         def propagate_fs(i,fs):
-            j = num_nodes-i
+            j = num_nodes-i -1
             l = self.left[j]
             r = self.right[j]
             
@@ -60,16 +84,16 @@ class DMN(eqx.Module):
             
             updated = lax.cond(is_not_leaf, handle_inner,handle_leaf, operand=None)
             fs = fs.at[l].set(updated)
-            fs = fs.at[r].set(updated)
+            fs = fs.at[r].set(1-updated)
+        
             return  fs
         
         def body_fun(i, compliance):
-            j = num_nodes - i
+            j = num_nodes - i -1 
             l = self.left[j]
             r = self.right[j]
             theta_i = self.theta[j]
-            fs = self.fractions
-
+            
             is_leaf = (l == -1) & (r == -1)
            
             def handle_leaf(_):
@@ -83,19 +107,21 @@ class DMN(eqx.Module):
                 D2 = compliance[r]
                 f1 = fs[l]
                 f2 = fs[r]
-               
                 D_h = homogenise(D1, D2, f1, f2)
                 return rotate(D_h, theta_i)
 
             updated = lax.cond(is_leaf, handle_leaf, handle_inner, operand=None)
-            return compliance.at[i].set(updated)
-         
-        ws = lax.fori_loop(0,num_nodes+1, propagate_weights, ws)
-        fs = lax.fori_loop(5,num_nodes+1, propagate_fs, fs)
+            compliance = compliance.at[j].set(updated)
+    
+            return compliance.at[j].set(updated)
+        
+        ws = lax.fori_loop(0,num_nodes, propagate_weights, ws)
+        fs = lax.fori_loop( start,num_nodes, propagate_fs, fs)
         compliance = lax.fori_loop(0,num_nodes, body_fun, compliance)
+
        
       
-        return compliance[-1]
+        return compliance[0]
 
 # ---------- Utility functions (ported to JAX) ----------
 
@@ -192,22 +218,17 @@ phase1 = jnp.array(data[:200, 0:6])
 phase2 = jnp.array(data[:200, 6:12])
 D_dns = jnp.array(data[:200, 12:18])
 num_samples = phase1.shape[0]
+
 # ---------- Training Loop ----------
 key = jax.random.PRNGKey(0)
-dmn = DMN(
-    theta=jax.random.uniform(key, (7,),float,-jnp.pi, jnp.pi),
-    activation=jnp.array([0, 0, 0, 0.3, 0.22, 0.28, 0.56]),
-    weight=jnp.ones((7,)),
-    fractions=jnp.ones((7,)),
-    left=jnp.array([1, 3, 5, -1, -1, -1, -1]),
-    right=jnp.array([2, 4, 6, -1, -1, -1, -1]),
-    layer=jnp.array([0, 1, 1, 2, 2, 2, 2])
-)
+
+dmn = DMN(N=6, key=key)
 
 batch_size = 20
 
-opt = optax.adam(learning_rate=0.015)
+opt = optax.adam(learning_rate=0.0005)
 opt_state = opt.init(dmn)
+
 
 for epoch in range(1000):
     key,subkey = jax.random.split(key)
@@ -227,7 +248,7 @@ for epoch in range(1000):
         example_out = dmn(phase1[0], phase2[0])
         rel_err = error_relative(D_dns[0], example_out)
         print(f"Epoch {epoch}, Loss: {loss:.6f}, Rel Error: {rel_err*100:.4f} %")
-
-D_out = dmn(phase1[1], phase2[1])
-print("Final Output:", D_out)
-print("Target Output:", D_dns[1])
+    
+for i in range(5):
+    print(D_dns[i])
+    print(dmn(phase1[i], phase2[i]))
