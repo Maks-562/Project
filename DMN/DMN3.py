@@ -826,21 +826,15 @@ class Tree:
         element_map = {'0':'11', '1' :'12', '2' : '13', '3': '22', '4' : '23', '5' : '33' }
 
         children = [parent.left, parent.right]
-        
-        # parent.error_alpha = differentiate_D_wrt_D_r(parent)
-    
+      
         for child_index, child in enumerate(children,start = 1):
         
             for i in range(6):
                 
             
                 diff = self.differentiate_parent_sympy(parent, f'D_{child_index}_{element_map[str(i)]}',diff_wrt_rot = True)
-                # diff = differentiate_parent_jax(parent, f'D_{child_index}_{element_map[str(i)]}',diff_wrt_rot = True)
-
-                child.error_delta[i] = parent.error_alpha @ diff
-            # print(child.error_delta)
-
-    
+               
+                child.error_delta[i] = parent.error_alpha @ diff   
            
     def calc_error_alpha(self,parent):
 
@@ -935,7 +929,7 @@ class Tree:
         else:
             return False
 
-    def return_mapping_bottom_layer(self,rootnode,loading_index=1,yielded = False):
+    def return_mapping_bottom_layer(self,rootnode,loading_index=1):
         if rootnode is None:
             return
         queue = [rootnode]
@@ -947,14 +941,14 @@ class Tree:
             if node.right:
                 queue.append(node.right)
             if node.left is None and node.right is None:
-                return_mapping(node,loading_index=loading_index,yielded=yielded)
+                return_mapping(node,loading_index=loading_index)
 
 
     def plasticity_loader(self,rootnode,loading_path):
         rootnode.epss[:,0] = loading_path
         
         loading_indices = np.arange(1,len(loading_path),1)
-        yielded = False
+       
 
        
         rootnode.delta_eps = np.zeros((3,))
@@ -970,7 +964,7 @@ class Tree:
           
             while convergence_bool is False:
                
-                self.return_mapping_bottom_layer(rootnode,loading_index=loading_index,yielded=yielded)
+                self.return_mapping_bottom_layer(rootnode,loading_index=loading_index)
               
                 self.homogenise_system_res(rootnode)
                 
@@ -1080,7 +1074,7 @@ def calc_elasto_plastic_operator(node,dgamma=0,loading_index=1):
 
 # evaluates the trial elastic state. Checks for plastic adimssability.
 # only for bottom layer.loading_index should start at 1 I'm pretty sure.
-def return_mapping(node,loading_index=1,yielded = False):
+def return_mapping(node,loading_index=1):
     assert type(node) is Node
     assert loading_index >= 1
     
@@ -1158,16 +1152,16 @@ def evaluate_plastic_state(node,sigma_trial):
 
 # returns sigma_Y as a function of effective plastic strain.
 def hardening_law(eff_plas_strain):
-    if 0.0<=eff_plas_strain :
-        return 0.05 + 50*eff_plas_strain
-    # elif eff_plas_strain >= 0.008:
-    #     return 0.054 + 20*(eff_plas_strain)
+    if 0.0<=eff_plas_strain < 0.008:
+        return 0.08 + 100*eff_plas_strain
+    elif eff_plas_strain >= 0.008:
+        return 0.5 + 200*(eff_plas_strain)
   
 def H(eff_plas_strain):
-    if 0.0 <=eff_plas_strain:
-        return 50
-    # elif eff_plas_strain>=0.008:
-    #     return 20     
+    if 0.0 <=eff_plas_strain < 0.008:
+        return 100
+    elif eff_plas_strain>=0.008:
+        return  200
 
 def xi(node,delta_gamma,sigma_trial):
     D = convert_vectorised(node.rotated_compliance)
