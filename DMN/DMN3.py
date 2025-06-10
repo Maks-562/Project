@@ -3,7 +3,7 @@ import random
 import sympy as sym
 import pickle
 from math import ceil
-from helperfuncs import convert_matrix,convert_vectorised,calc_error_0,R,homogenise,error_relative,cost,relu, relu_prime,differentiate_D_wrt_theta,homogenise_res,P
+from DMN_funcs import convert_matrix,convert_vectorised,calc_error_0,R,homogenise,error_relative,cost,relu, relu_prime,differentiate_D_wrt_theta,homogenise_res,P
 
 class Node:
     def __init__(self,compliance,num_loading_steps = 10):
