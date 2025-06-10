@@ -671,17 +671,9 @@ class Tree:
                 queue.append(node.left)
             if node.right:
                 queue.append(node.right)
-            # print(node.layer)
+          
             cost[node.layer,node.index-1] = node.error_delta @ differentiate_D_wrt_theta(node.compliance,node.theta)
-            # print(np.dot(node.error_delta ,differentiate_D_wrt_theta(node.rotated_compliance,node.theta)))
-            # if node.layer == self.layers:
-            # print(differentiate_D_wrt_theta(node.rotated_compliance,node.theta))    
-                # 
-            #     D_temp = convert_vectorised(node.compliance)
-            #     D_1  = -R_prime(-node.theta) @ D_temp @ R(node.theta)  
-            #     D_2 = R(-node.theta)@D_temp@ R_prime(node.theta)
-            #     print(D_1,D_2)
-        # print(cost)
+        
         return cost
 
     # uses a BFS to return a node from a specific position
@@ -869,7 +861,13 @@ class Tree:
         # makes sure that the current node is not in the bottom layer.
         # Doesn't make sense to homogenise the bottom layer, since there
         # are no elements below it  
-        
+        if rootnode.left is None and rootnode.right is None:
+              
+            theta = rootnode.theta
+           
+            # rotation line equation (11) 
+            rootnode.rotated_compliance = convert_matrix(R(-theta) @ convert_vectorised(rootnode.compliance) @ R(theta))
+            rootnode.res_strain = R(-theta) @ rootnode.res_strain
         if rootnode.left is not None and rootnode.right is not None:
             p1 = rootnode.left.rotated_compliance
             p2 = rootnode.right.rotated_compliance
@@ -884,7 +882,9 @@ class Tree:
             # rotation line equation (11) 
             rootnode.rotated_compliance = convert_matrix(R(-theta) @ convert_vectorised(rootnode.compliance) @ R(theta))
             rootnode.res_strain = R(-theta) @ rootnode.res_strain
-    
+       
+         
+          
     # passing stresses and strains backwards and checks for convergence. Returns status of convergence.
     def backwards_pass(self,rootnode):
         max_error = -10**29
@@ -899,39 +899,88 @@ class Tree:
             if node.right:
                 queue.append(node.right)
             if node.left is not None and node.right is not None:
-            
                 
-                children = [node.left, node.right]
-                for child in children:
+                child1 = node.left
+                child2 = node.right
+
+                delta_sigma_par = R(node.theta)@node.delta_sigma
+                delta_eps_par = R(node.theta)@node.delta_eps 
+
+                C_hat = child2.f *np.linalg.inv(convert_vectorised(child1.rotated_compliance)) + child1.f * np.linalg.inv(convert_vectorised(child2.rotated_compliance))
+                delta_C = np.linalg.inv(convert_vectorised(child2.rotated_compliance)) - np.linalg.inv(convert_vectorised(child1.rotated_compliance))
+
+                s_temp = 1/C_hat[2,2] * np.array([child2.f * delta_C[0,2], child2.f, np.linalg.inv(convert_vectorised(child2.rotated_compliance))[2,2]])
+                s1 = np.array([[1,0,0]
+                                ,[0,1,0]
+                                ,s_temp])
+                C_hat = C_hat
+                delta_C = -delta_C
+                s_temp = 1/C_hat[2,2] * np.array([child1.f * delta_C[0,2], child1.f, np.linalg.inv(convert_vectorised(child1.rotated_compliance))[2,2]])
+
+                s2 = np.array([[1,0,0]
+                                ,[0,1,0]
+                                ,s_temp])
+                
+                delta_eps_new_1 = s1 @ delta_eps_par
+                delta_eps_new_2 = s2 @ delta_eps_par
+                # print(delta_eps_par)
+                
+                # print(delta_eps_new_2, delta_eps_par)
+                # child1.delta_sigma[0] = delta_sigma_par[0]/child1.f - child2.f/child1.f * delta_eps_par[0]/ child2.rotated_compliance[0]
+                # child1.delta_sigma[1] = delta_sigma_par[1]
+                # child1.delta_sigma[2] = delta_sigma_par[2]
+                
+                # child2.delta_sigma[0] = delta_sigma_par[0]/child2.f - child1.f/child2.f * delta_eps_par[0]/ child1.rotated_compliance[0]
+                # child2.delta_sigma[1] = delta_sigma_par[1]
+                # child2.delta_sigma[2] = delta_sigma_par[2]
+                
+                # print(child1.delta_sigma,child2.delta_sigma,child1.f,child2.f,child1.activation,child2.activation)
+                # delta_eps_new_1 = convert_vectorised(child1.rotated_compliance) @ child1.delta_sigma
+                # delta_eps_new_2 = convert_vectorised(child2.rotated_compliance) @ child2.delta_sigma
+                
+                if child1.layer== self.layers and child2.layer == self.layers:
+                    
+                    max_error =  max(np.linalg.norm(child1.delta_eps -delta_eps_new_1),max_error)
+                    max_error =  max(np.linalg.norm(child2.delta_eps -delta_eps_new_2),max_error)
+                    print(max_error)
+                    # print(delta_eps_new_1, delta_eps_par)
+                child1.delta_eps = delta_eps_new_1
+                child2.delta_eps = delta_eps_new_2
+                # if child1.layer ==self.layers:
+                #     print(child1.delta_eps,child1.layer)
+                
+                
+                # children = [node.left, node.right]
+                # for child in children:
                     
                     
-                    if child.left is not None and child.right is not None:
+                #     if child.left is not None and child.right is not None:
                         
                         
-                        child.delta_sigma[0] = (node.delta_eps[0] - child.rotated_compliance[1] * node.delta_sigma[1] - child.rotated_compliance[2] * node.delta_sigma[2]) / child.rotated_compliance[0]
-                        child.delta_sigma[1] = node.delta_sigma[1]
-                        child.delta_sigma[2] = node.delta_sigma[2]
+                #         child.delta_sigma[0] = (node.delta_eps[0] - child.rotated_compliance[1] * node.delta_sigma[1] - child.rotated_compliance[2] * node.delta_sigma[2]) / child.rotated_compliance[0]
+                #         child.delta_sigma[1] = node.delta_sigma[1]
+                #         child.delta_sigma[2] = node.delta_sigma[2]
                         
                         
                         
-                        # NOT SURE ABOUT THE LAST TERM
-                        child.delta_eps = convert_vectorised(child.rotated_compliance) @ child.delta_sigma 
+                #         # NOT SURE ABOUT THE LAST TERM
+                #         child.delta_eps = convert_vectorised(child.rotated_compliance) @ child.delta_sigma 
                          
                         
                     
                     
-                    else:
-                        child.delta_sigma[0] = (node.delta_eps[0] - child.rotated_compliance[1] * node.delta_sigma[1] - child.rotated_compliance[2] * node.delta_sigma[2]) / child.rotated_compliance[0]
-                        child.delta_sigma[1] = node.delta_sigma[1]
-                        child.delta_sigma[2] = node.delta_sigma[2]
+                #     else:
+                #         child.delta_sigma[0] = (node.delta_eps[0] - child.rotated_compliance[1] * node.delta_sigma[1] - child.rotated_compliance[2] * node.delta_sigma[2]) / child.rotated_compliance[0]
+                #         child.delta_sigma[1] = node.delta_sigma[1]
+                #         child.delta_sigma[2] = node.delta_sigma[2]
                         
                         
                         
-                        delta_eps_new =  convert_vectorised(child.rotated_compliance) @ child.delta_sigma 
-                        # print('delta_eps_new bottom:',delta_eps_new)
-                        max_error =  max(np.linalg.norm(child.delta_eps -delta_eps_new),max_error)
-                        # print('error:',np.linalg.norm(child.delta_eps -delta_eps_new))
-                        child.delta_eps =  delta_eps_new
+                #         delta_eps_new =  convert_vectorised(child.rotated_compliance) @ child.delta_sigma 
+                #         # print('delta_eps_new bottom:',delta_eps_new)
+                #         max_error =  max(np.linalg.norm(child.delta_eps -delta_eps_new),max_error)
+                #         # print('error:',np.linalg.norm(child.delta_eps -delta_eps_new))
+                #         child.delta_eps =  delta_eps_new
                     
                     # print(child.delta_sigma,child.delta_eps,child.res_strain)
             
@@ -945,7 +994,7 @@ class Tree:
                 
             #     node.delta_eps =  convert_vectorised(node.rotated_compliance) @ node.delta_sigma + node.res_strain
         # print('Max error in backwards pass is: ',max_error)
-        if max_error <10**-12:
+        if max_error <10**-14:
             return True
         else:
             # print('Max error in backwards pass is: ',max_error)
@@ -953,7 +1002,7 @@ class Tree:
 
            
 
-    def return_mapping_bottom_layer(self,rootnode,loading_index=1):
+    def return_mapping_bottom_layer(self,rootnode,loading_index=1,yielded = False):
         if rootnode is None:
             return
         queue = [rootnode]
@@ -965,7 +1014,7 @@ class Tree:
             if node.right:
                 queue.append(node.right)
             if node.left is None and node.right is None:
-                return_mapping(node,loading_index=loading_index)
+                return_mapping(node,loading_index=loading_index,yielded=yielded)
 
 
     def plasticity_loader(self,rootnode,loading_path):
@@ -975,20 +1024,41 @@ class Tree:
         rootnode.epss[:,0] = loading_path
         
         loading_indices = np.arange(1,len(loading_path),1)
-      
+        yielded = False
 
+        # rootnode.epss[loading_index] = rootnode.epss[loading_index - 1] + rootnode.delta_eps
+        rootnode.delta_eps = np.zeros((3,))
+        rootnode.delta_sigma = np.zeros((3,))
+        rootnode.res_strain = np.zeros((3,))
         for loading_index in loading_indices:
             
             convergence_bool = False
             # print(f'Loading index is: {loading_index}, loading value is: {loading_path[loading_index]}')
             counter =0
-            rootnode.delta_eps = rootnode.epss[loading_index] - rootnode.epss[loading_index-1]
+            # rootnode.delta_eps = rootnode.epss[loading_index] - rootnode.epss[loading_index-1]
+            delta_eps_target = rootnode.epss[loading_index] - rootnode.epss[loading_index-1]
+            # rootnode.delta_eps = delta_eps_target
+            # rootnode.delta_sigma =np.linalg.inv(convert_vectorised(rootnode.rotated_compliance))@ rootnode.delta_eps
+            # rootnode.delta_eps = np.linalg.inv(convert_vectorised(rootnode.rotated_compliance)) @ rootnode.delta_sigma + rootnode.res_strain
             # rootnode.delta_sigma = np.linalg.inv(convert_vectorised(rootnode.rotated_compliance))@ rootnode.delta_eps
+            # rootnode.delta_eps = np.zeros((3,))
+            # rootnode.delta_sigma = np.zeros((3,))
+        
+            # rootnode.delta_sigma = np.linalg.inv(convert_vectorised(rootnode.rotated_compliance)) @ delta_eps_target
+            # print('initial delta sigma:',rootnode.delta_sigma)
+            # rootnode.delta_sigma = np.zeros((3,))
             while convergence_bool is False:
-                self.return_mapping_bottom_layer(rootnode,loading_index=loading_index)
+                bottom_node = self.fetch_node(rootnode,4,2)
+                self.return_mapping_bottom_layer(rootnode,loading_index=loading_index,yielded=yielded)
+                print(rootnode.delta_eps,bottom_node.delta_eps)
                 self.homogenise_system_res(rootnode)
+                # if counter == 0:
+                #     print('Initial delta eps:',rootnode.res_strain)
+                #     break
                 
-                rootnode.delta_sigma = np.linalg.inv(convert_vectorised(rootnode.rotated_compliance)) @(rootnode.delta_eps -rootnode.res_strain) 
+                rootnode.delta_eps = convert_vectorised(rootnode.rotated_compliance) @ rootnode.delta_sigma + rootnode.res_strain
+                rootnode.delta_sigma -= np.linalg.inv(convert_vectorised(rootnode.rotated_compliance)) @(rootnode.delta_eps - delta_eps_target) 
+                
                 convergence_bool = self.backwards_pass(rootnode)
                 
          
@@ -999,20 +1069,28 @@ class Tree:
                 
                 
                 # # print('Convergence bool is: ',convergence_bool)
-                
+                # print(rootnode.delta_sigma,rootnode.delta_eps,rootnode.res_strain)
+              
 
-            
                 counter += 1
+               
                 # print(counter)
-                # if counter >10:
-                #     break
-                # update_output_stress(rootnode,loading_path,loading_index)
+                              # update_output_stress(rootnode,loading_path,loading_index)
+            # print('final delta sigma',rootnode.delta_sigma)
             # print('new delta aigma:',rootnode.delta_sigma)
+            # print(rootnode.delta_sigma,counter)
+            # if loading_index ==200:
+            #     break
             rootnode.sigmas[loading_index] = rootnode.sigmas[loading_index-1] +  rootnode.delta_sigma
+            # rootnode.epss[loading_index] = rootnode.epss[loading_index - 1] + rootnode.delta_eps
+            # rootnode.delta_eps = np.zeros((3,))
+            # rootnode.delta_sigma = np.zeros((3,))
+            # rootnode.res_strain = np.zeros((3,))
             # print(rootnode.sigmas[loading_index])
             # print('delta',rootnode.delta_sigma)
-            # print('counter',counter)
-
+            # print('counter',counter)      
+            # if counter >5:
+                # break
 # differentiates the volume fraction of the children
 #  node with respect to a series of weights in the bottom layer, with 
 # input of a parent node. Returns an array of the two derivatives 
@@ -1135,7 +1213,7 @@ def calc_elasto_plastic_operator(node,dgamma=0,loading_index=1):
 
 # evaluates the trial elastic state. Checks for plastic adimssability.
 # only for bottom layer.loading_index should start at 1 I'm pretty sure.
-def return_mapping(node,loading_index=1):
+def return_mapping(node,loading_index=1,yielded = False):
     assert type(node) is Node
     assert loading_index >= 1
     
@@ -1143,7 +1221,7 @@ def return_mapping(node,loading_index=1):
     # print()
     effective_plastic_strain_trial = node.eff_plas_strain
     # print('Effective plastic strain trial:',effective_plastic_strain_trial)
-    sigma_trial = np.linalg.inv(convert_vectorised(node.rotated_compliance)) @ eps_trial
+    sigma_trial = np.linalg.inv(convert_vectorised(node.compliance)) @ eps_trial
     
     xi_trial = sigma_trial.T @ P @ sigma_trial
 
@@ -1160,8 +1238,11 @@ def return_mapping(node,loading_index=1):
 
 
         # raise ValueError('Trial state is not admissible. Phi is greater than 1')
-    # print('Trial state is admissible. Phi is:',phi_trial)
+    # print(node.delta_eps,node.delta_sigma)
+    # print(phi_trial)
     # plastic condition
+    plastic_step = (phi_trial > 0)
+    
     if phi_trial <= 0.0:
         # print('elastic state')
         # elastic state
@@ -1174,10 +1255,11 @@ def return_mapping(node,loading_index=1):
         delta_gamma=0
     else:
         # print('plastic state at index',loading_index,'with trials',sigma_trial,eps_trial)
+        # print(phi_trial)
         # print('at index: ',node.index)
         delta_gamma = evaluate_plastic_state(node,sigma_trial)
         # print('Delta gamma is:',delta_gamma)
-        D = convert_vectorised(node.rotated_compliance)
+        D = convert_vectorised(node.compliance)
         A = np.linalg.inv(D + delta_gamma *P)@ D
         # print('sigma before:',sigma_trial)
         sigma_new = A@sigma_trial
@@ -1196,33 +1278,36 @@ def return_mapping(node,loading_index=1):
         # print(node.eff_plas_strain)
     # updating only for placeholder purposes.
     # print(sigma_new,eps_new)
-    phi_new = 0.5 *xi(node,delta_gamma,sigma_new)- 1/3 * hardening_law(effective_plastic_strain_trial)**2
+    phi_new = 0.5 *xi(node,0,sigma_new)- 1/3 * hardening_law(effective_plastic_strain_trial)**2
     # print('phi_new:',phi_new)
     assert np.isclose(phi_new, 0.0, atol=1e-3) or phi_new < 0.0, f'Phi is not admissible: {phi_new}'
+    # if convergence_bool:
     node.epss[loading_index] = eps_new
     node.sigmas[loading_index] = sigma_new
     node.delta_sigma = sigma_new - node.sigmas[loading_index-1]
-    node.delta_eps = eps_new - node.epss[loading_index-1]
+    # node.delta_eps = eps_new - node.epss[loading_index-1]
     node.eff_plas_strain = effective_plastic_strain_trial
+    
+
     # print('bottom node delta_sigma:',node.delta_sigma)
-    # print('compliance matrix before:',node.rotated_compliance)
+    # print('compliance matrix before:',node.compliance)
     # if delta_gamma != 0:
-    if delta_gamma>0:
-        # print('rotated_compliance before:',node.rotated_compliance)
-        node.rotated_compliance = convert_matrix(calc_elasto_plastic_operator(node,delta_gamma,loading_index=loading_index))
-    # print('rotated compliance after:',node.rotated_compliance)
+    if delta_gamma > 0:
+        # print('rotated_compliance before:',node.compliance)
+        node.compliance = convert_matrix(calc_elasto_plastic_operator(node,delta_gamma,loading_index=loading_index))
+    # print('rotated compliance after:',node.compliance)
+    node.res_strain = node.delta_eps - convert_vectorised(node.compliance) @ node.delta_sigma
     
     # print('effecyove plastoc strain',node.eff_plas_strain)
-    # print('compliance matrix after:',node.rotated_compliance)
-    node.res_strain = node.delta_eps - convert_vectorised(node.rotated_compliance) @ node.delta_sigma
-    # print(node.delta_eps , convert_vectorised(node.rotated_compliance) @ node.delta_sigma)
+    # print('compliance matrix after:',node.compliance)
+    # print(node.delta_eps , convert_vectorised(node.compliance) @ node.delta_sigma)
 
 # Evaluates at the CURRENT effective plastiv strain.
 # But uses the TRIAL stress
 def evaluate_plastic_state(node,sigma_trial):
     assert type(node) is Node
     
-    N_max_iters =50
+    N_max_iters =200
     delta_gamma = 0.000
     xi_temp = xi(node,delta_gamma,sigma_trial)
     phi = 1/2 * xi_temp - 1/3 * hardening_law(node.eff_plas_strain)**2
@@ -1249,8 +1334,9 @@ def evaluate_plastic_state(node,sigma_trial):
         # print(i,delta_gamma,phi)
         # print(phi,1/2 * xi_temp  , 1/3 * hardening_law(node.eff_plas_strain + delta_gamma * np.sqrt(2*xi_temp/3))**2)
         if abs(phi) <10**-8:
+            assert delta_gamma >= 0, f'Delta gamma is negative: {delta_gamma}'
             # print('returning delta gamma:',delta_gamma)
-            print('phi',phi)
+            # print('phi',phi)
             # print('iterative values after are:',1/2 * xi_temp  , 1/3 * hardening_law(node.eff_plas_strain + delta_gamma * np.sqrt(2*xi_temp/3))**2)
             # print('took',i,'iterations')
             return delta_gamma
@@ -1279,10 +1365,10 @@ def hardening_law(eff_plas_strain):
     # if np.isclose(eff_plas_strain,0):
     #     # print('returning 0.0')
     #     return 0.0
-    if 0.0<=eff_plas_strain < 0.008:
-        return 0.1 + 5*eff_plas_strain
-    elif eff_plas_strain >= 0.008:
-        return 0.14 + 2*(eff_plas_strain)
+    if 0.0<=eff_plas_strain :
+        return 0.05 + 50*eff_plas_strain
+    # elif eff_plas_strain >= 0.008:
+    #     return 0.054 + 20*(eff_plas_strain)
     # else:
     #     return 0.0
 
@@ -1299,11 +1385,10 @@ def hardening_law(eff_plas_strain):
 def H(eff_plas_strain):
     # if np.isclose(eff_plas_strain,0):
     #     return 0.0
-    if 0.0 <=eff_plas_strain < 0.008:
-        return 5.0
-    elif eff_plas_strain>=0.008:
-        return 2.0
-    # else: 
+    if 0.0 <=eff_plas_strain:
+        return 50
+    # elif eff_plas_strain>=0.008:
+    #     return 20       # else: 
     #     return 0.0
     # if eff_plas_strain >= 0.0:
         # return 0.1
