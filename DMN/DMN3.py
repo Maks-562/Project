@@ -3,8 +3,7 @@ import random
 import sympy as sym
 import pickle
 from math import ceil
-# from DMN_funcs import convert_matrix,convert_vectorised,calc_error_0,R,homogenise,error_relative,cost,relu, relu_prime,differentiate_D_wrt_theta
-from helperfuncs import *
+from helperfuncs import convert_matrix,convert_vectorised,calc_error_0,R,homogenise,error_relative,cost,relu, relu_prime,differentiate_D_wrt_theta,homogenise_res,P
 
 class Node:
     def __init__(self,compliance,num_loading_steps = 10):
@@ -902,7 +901,7 @@ class Tree:
                 
                 child1 = node.left
                 child2 = node.right
-                
+
                 delta_eps_par = R(node.theta)@node.delta_eps 
 
                 C_hat = child2.f *np.linalg.inv(convert_vectorised(child1.rotated_compliance)) + child1.f * np.linalg.inv(convert_vectorised(child2.rotated_compliance))
@@ -1095,8 +1094,6 @@ def return_mapping(node,loading_index=1,yielded = False):
 
     phi_trial = 1/2 * xi_trial - 1/3 * hardening_law(effective_plastic_strain_trial)**2
     
-    plastic_step = (phi_trial > 0)
-    
     if phi_trial <= 0.0:
         effective_plastic_strain_trial = effective_plastic_strain_trial
         sigma_new = sigma_trial
@@ -1120,8 +1117,6 @@ def return_mapping(node,loading_index=1,yielded = False):
     node.delta_sigma = sigma_new - node.sigmas[loading_index-1]
     # node.delta_eps = eps_new - node.epss[loading_index-1]
     node.eff_plas_strain = effective_plastic_strain_trial
-    
-
  
     if delta_gamma > 0:
         node.compliance = convert_matrix(calc_elasto_plastic_operator(node,delta_gamma,loading_index=loading_index))
