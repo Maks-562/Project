@@ -840,6 +840,7 @@ class Tree:
 
         parent.error_alpha = differentiate_D_wrt_D_r(parent)
 
+    # homogenises the system, but also calculates the residual strain. Only used for the non-linear analysis.
     def homogenise_system_res(self,rootnode):
         if rootnode is None:
             return
@@ -848,8 +849,6 @@ class Tree:
         self.homogenise_system_res(rootnode.left)
         self.homogenise_system_res(rootnode.right)
 
-
-      
 
         # makes sure that the current node is not in the bottom layer.
         # Doesn't make sense to homogenise the bottom layer, since there
@@ -861,6 +860,7 @@ class Tree:
             # rotation line equation (11) 
             rootnode.rotated_compliance = convert_matrix(R(-theta) @ convert_vectorised(rootnode.compliance) @ R(theta))
             rootnode.res_strain = R(-theta) @ rootnode.res_strain
+        
         if rootnode.left is not None and rootnode.right is not None:
             p1 = rootnode.left.rotated_compliance
             p2 = rootnode.right.rotated_compliance
@@ -878,7 +878,7 @@ class Tree:
        
          
           
-    # passing stresses and strains backwards and checks for convergence. Returns status of convergence.
+    # passing strains backwards using the strain localisation matrix and checks for convergence. Returns status of convergence.
     def backwards_pass(self,rootnode):
         max_error = -10**29
         if rootnode is None:
@@ -896,6 +896,7 @@ class Tree:
                 child1 = node.left
                 child2 = node.right
 
+                # undos the rotation 
                 delta_eps_par = R(node.theta)@node.delta_eps 
 
                 C_hat = child2.f *np.linalg.inv(convert_vectorised(child1.rotated_compliance)) + child1.f * np.linalg.inv(convert_vectorised(child2.rotated_compliance))
@@ -976,6 +977,8 @@ class Tree:
                 
                 counter += 1
             
+            if loading_index%10 == 0:
+                print('Convergence achieved in ',counter,' iterations for loading index: ',loading_index)
             rootnode.sigmas[loading_index] = rootnode.sigmas[loading_index-1] +  rootnode.delta_sigma
          
 # differentiates the volume fraction of the children
